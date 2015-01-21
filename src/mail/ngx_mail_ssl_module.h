@@ -39,7 +39,12 @@ typedef struct {
 
     ngx_str_t        ciphers;
 
+    ngx_array_t     *passwords;
+
     ngx_shm_zone_t  *shm_zone;
+
+    ngx_flag_t       session_tickets;
+    ngx_array_t     *session_ticket_keys;
 
     u_char          *file;
     ngx_uint_t       line;

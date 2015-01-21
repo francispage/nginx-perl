@@ -217,11 +217,11 @@ main(int argc, char *const *argv)
     }
 
     if (ngx_show_version) {
-        ngx_write_stderr("nginx-perl version: " NGINX_VER NGX_LINEFEED);
+        ngx_write_stderr("nginx version: " NGINX_VER_BUILD NGX_LINEFEED);
 
         if (ngx_show_help) {
             ngx_write_stderr(
-                "Usage: nginx-perl [-?hvVtq] [-s signal] [-c filename] "
+                "Usage: nginx [-?hvVtq] [-s signal] [-c filename] "
                              "[-p prefix] [-g directives]" NGX_LINEFEED
                              NGX_LINEFEED
                 "Options:" NGX_LINEFEED
@@ -387,13 +387,8 @@ main(int argc, char *const *argv)
         return 1;
     }
 
-    if (cycle->log->file->fd != ngx_stderr) {
-
-        if (ngx_set_stderr(cycle->log->file->fd) == NGX_FILE_ERROR) {
-            ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
-                          ngx_set_stderr_n " failed");
-            return 1;
-        }
+    if (ngx_log_redirect_stderr(cycle) != NGX_OK) {
+        return 1;
     }
 
     if (log->file->fd != ngx_stderr) {

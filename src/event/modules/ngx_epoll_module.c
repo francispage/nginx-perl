@@ -25,6 +25,8 @@
 #define EPOLLERR       0x008
 #define EPOLLHUP       0x010
 
+#define EPOLLRDHUP     0x2000
+
 #define EPOLLET        0x80000000
 #define EPOLLONESHOT   0x40000000
 
@@ -191,10 +193,6 @@ ngx_module_t  ngx_epoll_module = {
  * We call io_setup(), io_destroy() io_submit(), and io_getevents() directly
  * as syscalls instead of libaio usage, because the library header file
  * supports eventfd() since 0.3.107 version only.
- *
- * Also we do not use eventfd() in glibc, because glibc supports it
- * since 2.8 version and glibc maps two syscalls eventfd() and eventfd2()
- * into single eventfd() function with different number of parameters.
  */
 
 static int
@@ -225,7 +223,11 @@ ngx_epoll_aio_init(ngx_cycle_t *cycle, ngx_epoll_conf_t *epcf)
     int                 n;
     struct epoll_event  ee;
 
+#if (NGX_HAVE_SYS_EVENTFD_H)
+    ngx_eventfd = eventfd(0, 0);
+#else
     ngx_eventfd = syscall(SYS_eventfd, 0);
+#endif
 
     if (ngx_eventfd == -1) {
         ngx_log_error(NGX_LOG_EMERG, cycle->log, ngx_errno,
@@ -396,13 +398,13 @@ ngx_epoll_add_event(ngx_event_t *ev, ngx_int_t event, ngx_uint_t flags)
     if (event == NGX_READ_EVENT) {
         e = c->write;
         prev = EPOLLOUT;
-#if (NGX_READ_EVENT != EPOLLIN)
-        events = EPOLLIN;
+#if (NGX_READ_EVENT != EPOLLIN|EPOLLRDHUP)
+        events = EPOLLIN|EPOLLRDHUP;
 #endif
 
     } else {
         e = c->read;
-        prev = EPOLLIN;
+        prev = EPOLLIN|EPOLLRDHUP;
 #if (NGX_WRITE_EVENT != EPOLLOUT)
         events = EPOLLOUT;
 #endif
@@ -466,7 +468,7 @@ ngx_epoll_del_event(ngx_event_t *ev, ngx_int_t event, ngx_uint_t flags)
 
     } else {
         e = c->read;
-        prev = EPOLLIN;
+        prev = EPOLLIN|EPOLLRDHUP;
     }
 
     if (e->active) {
@@ -501,7 +503,7 @@ ngx_epoll_add_connection(ngx_connection_t *c)
 {
     struct epoll_event  ee;
 
-    ee.events = EPOLLIN|EPOLLOUT|EPOLLET;
+    ee.events = EPOLLIN|EPOLLOUT|EPOLLET|EPOLLRDHUP;
     ee.data.ptr = (void *) ((uintptr_t) c | c->read->instance);
 
     ngx_log_debug2(NGX_LOG_DEBUG_EVENT, c->log, 0,
@@ -566,7 +568,8 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
     ngx_int_t          instance, i;
     ngx_uint_t         level;
     ngx_err_t          err;
-    ngx_event_t       *rev, *wev, **queue;
+    ngx_event_t       *rev, *wev;
+    ngx_queue_t       *queue;
     ngx_connection_t  *c;
 
     /* NGX_TIMER_INFINITE == INFTIM */
@@ -609,8 +612,6 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
                       "epoll_wait() returned no events without timeout");
         return NGX_ERROR;
     }
-
-    ngx_mutex_lock(ngx_posted_events_mutex);
 
     for (i = 0; i < events; i++) {
         c = event_list[i].data.ptr;
@@ -666,18 +667,19 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
 
         if ((revents & EPOLLIN) && rev->active) {
 
-            if ((flags & NGX_POST_THREAD_EVENTS) && !rev->accept) {
-                rev->posted_ready = 1;
-
-            } else {
-                rev->ready = 1;
+#if (NGX_HAVE_EPOLLRDHUP)
+            if (revents & EPOLLRDHUP) {
+                rev->pending_eof = 1;
             }
+#endif
+
+            rev->ready = 1;
 
             if (flags & NGX_POST_EVENTS) {
-                queue = (ngx_event_t **) (rev->accept ?
-                               &ngx_posted_accept_events : &ngx_posted_events);
+                queue = rev->accept ? &ngx_posted_accept_events
+                                    : &ngx_posted_events;
 
-                ngx_locked_post_event(rev, queue);
+                ngx_post_event(rev, queue);
 
             } else {
                 rev->handler(rev);
@@ -700,23 +702,16 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
                 continue;
             }
 
-            if (flags & NGX_POST_THREAD_EVENTS) {
-                wev->posted_ready = 1;
-
-            } else {
-                wev->ready = 1;
-            }
+            wev->ready = 1;
 
             if (flags & NGX_POST_EVENTS) {
-                ngx_locked_post_event(wev, &ngx_posted_events);
+                ngx_post_event(wev, &ngx_posted_events);
 
             } else {
                 wev->handler(wev);
             }
         }
     }
-
-    ngx_mutex_unlock(ngx_posted_events_mutex);
 
     return NGX_OK;
 }

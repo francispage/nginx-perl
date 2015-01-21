@@ -1,29 +1,33 @@
 
-# Copyright (C) Igor Sysoev, Alexandr Gomoliako
+# Copyright (C) Igor Sysoev
 # Copyright (C) Nginx, Inc.
 
+use 5.006001;
 use ExtUtils::MakeMaker;
 
 WriteMakefile(
-    NAME              => 'Nginx',
-    VERSION_FROM      => 'Nginx.pm',
-    PREREQ_PM         => {},
-    ABSTRACT_FROM     => 'Nginx.pm',
-    AUTHOR            => 'Igor Sysoev, Alexandr Gomoliako',
+    NAME              => 'nginx',
+    VERSION_FROM      => 'nginx.pm',     # finds $VERSION
+    PREREQ_PM         => {},             # e.g., Module::Name => 1.1
+
+    ABSTRACT_FROM     => 'nginx.pm',     # retrieve abstract from module
+    AUTHOR            => 'Igor Sysoev',
+
     CCFLAGS           => "$ENV{NGX_PM_CFLAGS}",
     OPTIMIZE          => '-O',
+
     INC               => join(" ", map {
                              m#^/# ? "-I $_" : "-I ../../../../../$_"
                          } (split /\s+/, $ENV{NGX_INCS})),
 
     depend => {
-        'Nginx.c' =>
-            "../../../../../src/http/modules/perl/ngx_http_perl_module.h"
+        'nginx.c'     => join(" ", map {
+                             m#^/# ? $_ : "../../../../../$_"
+                         } (split(/\s+/, $ENV{NGX_DEPS}),
+                            "src/http/modules/perl/ngx_http_perl_module.h"))
     },
 
     PM => {
-        'Nginx.pm' => '$(INST_LIBDIR)/Nginx.pm',
-        'Test.pm'  => '$(INST_LIBDIR)/Nginx/Test.pm',
-        'Perl.pm'  => '$(INST_LIBDIR)/Nginx/Perl.pm',
+        'nginx.pm'    => '$(INST_LIBDIR)/nginx.pm'
     }
 );

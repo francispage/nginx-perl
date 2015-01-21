@@ -69,18 +69,12 @@ struct ngx_event_s {
 
     unsigned         delayed:1;
 
-    unsigned         read_discarded:1;
-
-    unsigned         unexpected_eof:1;
-
     unsigned         deferred_accept:1;
 
-    /* the pending eof reported by kqueue or in aio chain operation */
+    /* the pending eof reported by kqueue, epoll or in aio chain operation */
     unsigned         pending_eof:1;
 
-#if !(NGX_THREADS)
-    unsigned         posted_ready:1;
-#endif
+    unsigned         posted:1;
 
 #if (NGX_WIN32)
     /* setsockopt(SO_UPDATE_ACCEPT_CONTEXT) was successful */
@@ -133,39 +127,16 @@ struct ngx_event_s {
 
     ngx_rbtree_node_t   timer;
 
+    /* the posted queue */
+    ngx_queue_t      queue;
+
     unsigned         closed:1;
 
     /* to test on worker exit */
     unsigned         channel:1;
     unsigned         resolver:1;
 
-#if (NGX_THREADS)
-
-    unsigned         locked:1;
-
-    unsigned         posted_ready:1;
-    unsigned         posted_timedout:1;
-    unsigned         posted_eof:1;
-
-#if (NGX_HAVE_KQUEUE)
-    /* the pending errno reported by kqueue */
-    int              posted_errno;
-#endif
-
-#if (NGX_HAVE_KQUEUE) || (NGX_HAVE_IOCP)
-    int              posted_available;
-#else
-    unsigned         posted_available:1;
-#endif
-
-    ngx_atomic_t    *lock;
-    ngx_atomic_t    *own_lock;
-
-#endif
-
-    /* the links of the posted queue */
-    ngx_event_t     *next;
-    ngx_event_t    **prev;
+    unsigned         cancelable:1;
 
 
 #if 0
@@ -353,6 +324,11 @@ extern ngx_event_actions_t   ngx_event_actions;
 #define NGX_VNODE_EVENT    0
 
 
+#if (NGX_HAVE_EPOLL) && !(NGX_HAVE_EPOLLRDHUP)
+#define EPOLLRDHUP         0
+#endif
+
+
 #if (NGX_HAVE_KQUEUE)
 
 #define NGX_READ_EVENT     EVFILT_READ
@@ -396,7 +372,7 @@ extern ngx_event_actions_t   ngx_event_actions;
 
 #elif (NGX_HAVE_EPOLL)
 
-#define NGX_READ_EVENT     EPOLLIN
+#define NGX_READ_EVENT     (EPOLLIN|EPOLLRDHUP)
 #define NGX_WRITE_EVENT    EPOLLOUT
 
 #define NGX_LEVEL_EVENT    0
@@ -511,13 +487,13 @@ extern ngx_atomic_t  *ngx_stat_requests;
 extern ngx_atomic_t  *ngx_stat_active;
 extern ngx_atomic_t  *ngx_stat_reading;
 extern ngx_atomic_t  *ngx_stat_writing;
+extern ngx_atomic_t  *ngx_stat_waiting;
 
 #endif
 
 
 #define NGX_UPDATE_TIME         1
 #define NGX_POST_EVENTS         2
-#define NGX_POST_THREAD_EVENTS  4
 
 
 extern sig_atomic_t           ngx_event_timer_alarm;
